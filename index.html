@@ -282,6 +282,9 @@ select:focus{border-color:var(--primary);background-color:var(--input-focus);box
 }
 .file-drop:hover{border-color:var(--primary);background:var(--chip-bg)}
 .file-drop.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
+.file-drop.dragover{border-style:solid;border-color:var(--primary);background:var(--chip-bg);transform:scale(1.01)}
+.file-drop .drop-hint{display:none;font-weight:500;opacity:.75}
+@media (hover:hover) and (pointer:fine){.file-drop .drop-hint{display:inline}}
 .has-error .file-drop{border-color:var(--danger);background:var(--danger-bg)}
 .file-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .file-item{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border);border-radius:12px;background:var(--input-bg);animation:slideIn .25s ease}
@@ -372,7 +375,7 @@ select:focus{border-color:var(--primary);background-color:var(--input-focus);box
 
     <div class="form-group" data-field="files">
       <label>Вложения <span class="req">*</span> <span class="counter" id="filesCount"></span></label>
-      <label class="file-drop" id="fileDrop" for="fileInput">📎 Добавить фото или PDF</label>
+      <label class="file-drop" id="fileDrop" for="fileInput">📎 Добавить фото или PDF<span class="drop-hint">· бросьте файл на страницу или вставьте Ctrl+V</span></label>
       <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
       <div class="file-list" id="fileList"></div>
       <div class="error-msg"></div>
@@ -409,7 +412,7 @@ select:focus{border-color:var(--primary);background-color:var(--input-focus);box
 
 <script>
 // URL веб-приложения Google Apps Script (…/exec) нового развёртывания. Вставьте свой адрес.
-const API_URL = 'https://script.google.com/macros/s/AKfycbwz6R2Hdvjv4jVS-bZvzNg77M1ce9stdf1Qp9U6QraJvtFkMPxKcU4wkA7BNAib62ET/exec';
+const API_URL = 'ВСТАВЬТЕ_URL_ДЕПЛОЯ_/exec';
 const API_READY = /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API_URL);
 const MAX_CONTRACTS = 10;
 const FILES_MAX = 5, FILE_MAX = 10 * 1024 * 1024, FILES_TOTAL_MAX = 15 * 1024 * 1024, IMG_SRC_MAX = 40 * 1024 * 1024;
@@ -745,6 +748,51 @@ function validateFiles() {
   return setError(groupOf('files'), files.length ? '' : 'Прикрепите хотя бы один файл (скрин или PDF)');
 }
 els.fileInput.addEventListener('change', () => addFiles(els.fileInput.files));
+
+// Перетаскивание файлов: принимаем в ЛЮБОМ месте страницы, зона загрузки при этом подсвечивается.
+// Счётчик вложенных dragenter/dragleave убирает мигание подсветки.
+(function setupDragDrop() {
+  const zone = els.fileDrop;
+  const hasFiles = e => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  const modalOpen = () => !!document.querySelector('.overlay.open');
+  let depth = 0;
+  const clear = () => { depth = 0; zone.classList.remove('dragover'); };
+  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; if (!modalOpen()) zone.classList.add('dragover'); });
+  window.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = modalOpen() ? 'none' : 'copy'; });
+  window.addEventListener('dragleave', e => { if (!hasFiles(e)) return; if (--depth <= 0) clear(); });
+  window.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); clear(); // всегда гасим: иначе браузер откроет файл и уведёт со страницы (заполненная форма потеряется)
+    if (modalOpen()) return;
+    if (sending) { toast('Идёт отправка, подождите', 'error'); return; }
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+  window.addEventListener('dragend', clear);
+})();
+
+// Вставка из буфера обмена (Ctrl+V / Win+V): скриншоты, скопированные фото и файлы. Обычный текст не трогаем.
+(function setupPaste() {
+  let n = 0;
+  const pad = v => String(v).padStart(2, '0');
+  const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+  // Скриншот из буфера приходит с именем «image.png»: даём понятное уникальное имя
+  const named = f => {
+    const generic = !f.name || /^image\.[a-z]+$/i.test(f.name);
+    if (!generic) return f;
+    const t = new Date(), ext = EXT[(f.type || '').toLowerCase()] || 'png';
+    return new File([f], `Скриншот ${pad(t.getHours())}-${pad(t.getMinutes())}-${pad(t.getSeconds())}${n++ ? '_' + n : ''}.${ext}`, { type: f.type });
+  };
+  document.addEventListener('paste', e => {
+    const cd = e.clipboardData; if (!cd) return;
+    let list = [...(cd.files || [])];
+    if (!list.length) list = [...(cd.items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+    if (!list.length) return; // в буфере текст: пусть вставляется в поле как обычно
+    e.preventDefault();
+    if (document.querySelector('.overlay.open')) return; // открыто окно подтверждения или результата
+    if (sending) { toast('Идёт отправка, подождите', 'error'); return; }
+    addFiles(list.map(named));
+  });
+})();
 
 /* ---------- Черновик: только текстовые поля, файлы не сохраняются ---------- */
 function saveDraft() {
