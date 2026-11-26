@@ -538,7 +538,7 @@ const validators = {
   clientName(v) {
     v = clean(v);
     if (!v) return 'Укажите ФИО клиента';
-    if (!/^[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ'’`\-\s.]+$/.test(v)) return 'ФИО может содержать только буквы, пробел, дефис';
+    if (!/^[\p{L}'’‘ʻʼʽʹ′´`\-\s.]+$/u.test(v)) return 'ФИО может содержать только буквы, пробел, дефис и апостроф';
     if (v.split(' ').filter(w => w.length > 1).length < 2) return 'Введите минимум фамилию и имя';
     if (v.length > 100) return 'Слишком длинное значение (макс. 100)';
     return '';
